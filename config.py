@@ -14,7 +14,7 @@ class Config:
     parser.add_argument("--max_summary_length", default=150, type=int)
     parser.add_argument("--global_step", default=0, type=int)
     parser.add_argument("--global_epoch", default=0, type=int)
-    parser.add_argument("--batch_size", default="4", type=int)
+    parser.add_argument("--batch_size", default="2", type=int)
     parser.add_argument("--num_gpus", default="1", type=int)
     parser.add_argument("--lr", default="3e-5", type=float)
     parser.add_argument("--seed", default="1", type=int)
