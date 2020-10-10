@@ -1,0 +1,23 @@
+import argparse
+
+
+class Config:
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--data_path", default="data", type=str)
+    parser.add_argument("--bos_idx", default=0, type=int)
+    parser.add_argument("--eos_idx", default=1, type=int)
+    parser.add_argument("--pad_idx", default=3, type=int)
+    parser.add_argument("--unk_idx", default=5, type=int)
+    parser.add_argument("--max_length", default=1024, type=int)
+    parser.add_argument("--vocab_size", default=50000, type=int)
+    parser.add_argument("--max_summary_length", default=150, type=int)
+    parser.add_argument("--global_step", default=0, type=int)
+    parser.add_argument("--global_epoch", default=0, type=int)
+    parser.add_argument("--batch_size", default="4", type=int)
+    parser.add_argument("--num_gpus", default="1", type=int)
+    parser.add_argument("--lr", default="3e-5", type=float)
+    parser.add_argument("--seed", default="1", type=int)
+    parser.add_argument("--save_path", default=None, type=str)
+    parser.add_argument("--early_stop_count", default="5", type=int)
+    parser.add_argument("--max_epochs", default="20", type=int)
