@@ -218,14 +218,13 @@ def validate(model, reader, config, local_rank):
             inputs, labels, doc_lengths = reader.make_input(batch, train=False)
             batch_size = inputs.size(0)
             length = inputs.size(1)
-            inputs = inputs.contiguous()
-            labels = labels.contiguous()
             words = []
             eos_batches = [False for i in range(batch_size)]
             end_batches = [True for i in range(batch_size)]
             for word_count in range(config.max_summary_length):
                 pad_mask = (inputs != reader.pad_idx).cuda()
-                pred = model(inputs, attention_mask=pad_mask)[0]
+                outputs = model(inputs, attention_mask=pad_mask)
+                pred = outputs[0].detach()
                 word = pred[:, -1, :].argmax(dim=-1)
                 words.append(word)
                 word = word.tolist()
@@ -234,11 +233,11 @@ def validate(model, reader, config, local_rank):
                     b_input = inputs[b_idx][inputs[b_idx] != reader.pad_idx].tolist()
                     b_input.append(word[b_idx])
                     b_input = b_input[-config.max_length:]
-                    if word == reader.eos_idx:
+                    if word[b_idx] == reader.eos_idx:
                         eos_batches[b_idx] = True
                     new_inputs[b_idx, :len(b_input)] = torch.tensor(b_input, dtype=torch.int64)
-                inputs = deepcopy(new_inputs)
-                del new_inputs
+                inputs = new_inputs
+                del new_inputs, outputs
                 if eos_batches == end_batches:
                     break
             words = torch.stack(words, dim=1).tolist()
@@ -253,9 +252,8 @@ def validate(model, reader, config, local_rank):
             if local_rank == 0:
                 t.set_description("iter: {}".format(batch_idx+1))
                 time.sleep(1)
-            del pred
+            torch.cuda.empty_cache()
     score = score / batch_count
-    torch.cuda.empty_cache()
     model.train()
 
     return score

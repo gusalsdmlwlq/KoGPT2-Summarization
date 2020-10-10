@@ -58,13 +58,13 @@ class Reader:
         for batch_idx in range(batch_size):
             document = self.tokenizer.EncodeAsIds(batch[batch_idx]["document"] + " ; Summary: ")
             summary = self.tokenizer.EncodeAsIds(batch[batch_idx]["summary"])
-            doc_lengths.append(len(document))
             if train:
                 document = document[-(self.max_length - len(summary) - 1):]
                 context = document + summary
             else:
                 document = document[-self.max_length:]
                 context = document
+            doc_lengths.append(len(document))
             length = len(context)
             inputs[batch_idx, :length] = torch.tensor(context, dtype=torch.int64)
             if train:

@@ -10,7 +10,7 @@ import numpy as np
 import torch
 from torch.optim import Adam
 from torch.utils.tensorboard import SummaryWriter
-# from torch.multiprocessing import Process
+from torch.multiprocessing import Process
 import torch.nn.functional as F
 from tqdm import tqdm
 import torch.distributed as dist
@@ -87,7 +87,7 @@ def init_process(local_rank, backend, config):
     train.max_iter = len(list(reader.make_batch("train")))
     validate.max_iter = len(list(reader.make_batch("dev")))
 
-    min_loss = 1e+10
+    max_score = 0
     early_stop_count = config.early_stop_count
 
     logger.info("Validate...")
@@ -114,14 +114,14 @@ def init_process(local_rank, backend, config):
         logger.info("ROUGE score: {:.4f}".format(score))
         
         if local_rank == 0:
-            writer.add_scalar("Val/loss", loss, epoch+1)
+            writer.add_scalar("Val/ROGUE score", score, epoch+1)
 
-        if loss < min_loss:  # save model
+        if score > max_score:  # save model
             if local_rank == 0:
                 save(model, optimizer, save_path, config)
                 logger.info("Saved to {}.".format(os.path.abspath(save_path)))
             
-            min_loss = loss
+            max_score = score
             early_stop_count = config.early_stop_count
         else:  # ealry stopping
             if early_stop_count == 0:
@@ -180,7 +180,7 @@ def train(model, reader, optimizer, config, local_rank, writer=None):
                 t.set_description("iter: {}, loss: {:.4f}".format(batch_idx+1, loss.item()))
                 time.sleep(1)
             
-            del loss
+            del pred, loss
             torch.cuda.empty_cache()
 
         except RuntimeError as e:
@@ -216,24 +216,27 @@ def validate(model, reader, config, local_rank):
             inputs, labels, doc_lengths = reader.make_input(batch, train=False)
             batch_size = inputs.size(0)
             length = inputs.size(1)
-            inputs = inputs.contiguous()
-            labels = labels.contiguous()
+            # inputs = inputs.contiguous()
+            # labels = labels.contiguous()
             words = []
             eos_batches = [False for i in range(batch_size)]
             end_batches = [True for i in range(batch_size)]
             for word_count in range(config.max_summary_length):
                 pad_mask = (inputs != reader.pad_idx).cuda()
                 pred = model(inputs, attention_mask=pad_mask)[0]
-                word = pred[:, -1, :].argmax(dim=-1).tolist()
+                word = pred.detach()[:, -1, :].argmax(dim=-1)
+                words.append(word)
+                word = word.tolist()
+                new_inputs = torch.ones(batch_size, min(inputs.size(1)+1, config.max_length), dtype=torch.int64).cuda()
                 for b_idx in range(batch_size):
-                    if eos_batches[b_idx]:
-                        continue
                     b_input = inputs[b_idx][inputs[b_idx] != reader.pad_idx].tolist()
-                    b_input.append(word[b_idx])[-config.max_length:]
+                    b_input.append(word[b_idx])
+                    b_input = b_input[-config.max_length:]
                     if word == reader.eos_idx:
                         eos_batches[b_idx] = True
-                    inputs[b_idx, :len(b_input)] = torch.tensor(b_input, dtype=torch.int64)
-                words.append(word)
+                    new_inputs[b_idx, :len(b_input)] = torch.tensor(b_input, dtype=torch.int64)
+                inputs = deepcopy(new_inputs)
+                del new_inputs
                 if eos_batches == end_batches:
                     break
             words = torch.stack(words, dim=1).tolist()
@@ -244,7 +247,8 @@ def validate(model, reader, config, local_rank):
                         words[b_idx] = words[b_idx][:word_idx+1]
                 true_sentence = reader.tokenizer.DecodeIds(labels[b_idx][labels[b_idx] != reader.pad_idx].tolist())
                 generated_sentence = reader.tokenizer.DecodeIds(words[b_idx])
-                score += scorer.score(true_sentence, generated_sentence)
+                score += scorer.score(true_sentence, generated_sentence)["rouge1"].fmeasure
+                print(torch.cuda.memory_allocated())
             if local_rank == 0:
                 t.set_description("iter: {}".format(batch_idx+1))
                 time.sleep(1)
