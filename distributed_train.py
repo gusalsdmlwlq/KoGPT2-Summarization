@@ -14,10 +14,9 @@ from torch.multiprocessing import Process
 import torch.nn.functional as F
 from tqdm import tqdm
 import torch.distributed as dist
-from kogpt2.pytorch_kogpt2 import get_pytorch_kogpt2_model
 from sentencepiece import SentencePieceProcessor as sp
-from kogpt2.utils import get_tokenizer
 from rouge_score import rouge_scorer
+from transformers import GPT2Config, GPT2LMHeadModel
 
 from config import Config
 from reader import Reader
@@ -77,8 +76,9 @@ def init_process(local_rank, backend, config):
     end = time.time()
     logger.info("Loaded. {} secs".format(end-start))
 
-    model, vocab = get_pytorch_kogpt2_model()
-    model = model.cuda()
+    gpt2_config = GPT2Config(vocab_size=config.vocab_size)
+    model = GPT2LMHeadModel(gpt2_config).cuda()
+    model.load_state_dict(torch.load(config.kogpt2_model_path, map_location = lambda storage, loc: storage.cuda(local_rank)))
     optimizer = Adam(model.parameters(), lr=config.lr)
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], output_device=local_rank)
 
@@ -272,8 +272,8 @@ def load(model, optimizer, save_path, local_rank, config):
     checkpoint = torch.load(save_path, map_location = lambda storage, loc: storage.cuda(local_rank))
     model.module.load_state_dict(checkpoint["model"])
     optimizer.load_state_dict(checkpoint["optimizer"])
-    config.global_step = checkpoint["global_step"]
-    config.global_epoch = checkpoint["global_epoch"]
+    config.global_step = checkpoint["step"]
+    config.global_epoch = checkpoint["epoch"]
 
 if __name__ == "__main__":
     os.environ["KMP_WARNINGS"] = "0"

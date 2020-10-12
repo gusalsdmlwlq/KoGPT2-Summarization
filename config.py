@@ -20,4 +20,5 @@ class Config:
     parser.add_argument("--seed", default="1", type=int)
     parser.add_argument("--save_path", default=None, type=str)
     parser.add_argument("--early_stop_count", default="5", type=int)
-    parser.add_argument("--max_epochs", default="20", type=int)
+    parser.add_argument("--max_epochs", default="40", type=int)
+    parser.add_argument("--min_epochs", default="20", type=int)

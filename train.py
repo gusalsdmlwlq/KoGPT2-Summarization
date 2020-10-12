@@ -14,10 +14,9 @@ from torch.multiprocessing import Process
 import torch.nn.functional as F
 from tqdm import tqdm
 import torch.distributed as dist
-from kogpt2.pytorch_kogpt2 import get_pytorch_kogpt2_model
 from sentencepiece import SentencePieceProcessor as sp
-from kogpt2.utils import get_tokenizer
 from rouge_score import rouge_scorer
+from transformers import GPT2Config, GPT2LMHeadModel
 
 from config import Config
 from reader import Reader
@@ -45,7 +44,6 @@ def distribute_data(batches, num_gpus):
 def init_process(local_rank, backend, config):
     os.environ['MASTER_ADDR'] = '127.0.0.1'
     os.environ['MASTER_PORT'] = '29500'
-    torch.cuda.set_device(local_rank)
 
     random.seed(config.seed)
     np.random.seed(config.seed)
@@ -76,8 +74,9 @@ def init_process(local_rank, backend, config):
     end = time.time()
     logger.info("Loaded. {} secs".format(end-start))
 
-    model, vocab = get_pytorch_kogpt2_model()
-    model = model.cuda()
+    gpt2_config = GPT2Config(vocab_size=config.vocab_size)
+    model = GPT2LMHeadModel(gpt2_config).cuda()
+    model.load_state_dict(torch.load(config.kogpt2_model_path, map_location = lambda storage, loc: storage.cuda(local_rank)))
     optimizer = Adam(model.parameters(), lr=config.lr)
 
     if config.save_path is not None:
@@ -87,6 +86,7 @@ def init_process(local_rank, backend, config):
     train.max_iter = len(list(reader.make_batch("train")))
     validate.max_iter = len(list(reader.make_batch("dev")))
 
+    lr = config.lr
     max_score = 0
     early_stop_count = config.early_stop_count
 
@@ -216,15 +216,14 @@ def validate(model, reader, config, local_rank):
             inputs, labels, doc_lengths = reader.make_input(batch, train=False)
             batch_size = inputs.size(0)
             length = inputs.size(1)
-            # inputs = inputs.contiguous()
-            # labels = labels.contiguous()
             words = []
             eos_batches = [False for i in range(batch_size)]
             end_batches = [True for i in range(batch_size)]
             for word_count in range(config.max_summary_length):
                 pad_mask = (inputs != reader.pad_idx).cuda()
-                pred = model(inputs, attention_mask=pad_mask)[0]
-                word = pred.detach()[:, -1, :].argmax(dim=-1)
+                outputs = model(inputs, attention_mask=pad_mask)
+                pred = outputs[0].detach()
+                word = pred[:, -1, :].argmax(dim=-1)
                 words.append(word)
                 word = word.tolist()
                 new_inputs = torch.ones(batch_size, min(inputs.size(1)+1, config.max_length), dtype=torch.int64).cuda()
@@ -232,11 +231,11 @@ def validate(model, reader, config, local_rank):
                     b_input = inputs[b_idx][inputs[b_idx] != reader.pad_idx].tolist()
                     b_input.append(word[b_idx])
                     b_input = b_input[-config.max_length:]
-                    if word == reader.eos_idx:
+                    if word[b_idx] == reader.eos_idx:
                         eos_batches[b_idx] = True
                     new_inputs[b_idx, :len(b_input)] = torch.tensor(b_input, dtype=torch.int64)
-                inputs = deepcopy(new_inputs)
-                del new_inputs
+                inputs = new_inputs
+                del new_inputs, outputs
                 if eos_batches == end_batches:
                     break
             words = torch.stack(words, dim=1).tolist()
@@ -248,20 +247,18 @@ def validate(model, reader, config, local_rank):
                 true_sentence = reader.tokenizer.DecodeIds(labels[b_idx][labels[b_idx] != reader.pad_idx].tolist())
                 generated_sentence = reader.tokenizer.DecodeIds(words[b_idx])
                 score += scorer.score(true_sentence, generated_sentence)["rouge1"].fmeasure
-                print(torch.cuda.memory_allocated())
             if local_rank == 0:
                 t.set_description("iter: {}".format(batch_idx+1))
                 time.sleep(1)
-            del pred
+            torch.cuda.empty_cache()
     score = score / batch_count
-    torch.cuda.empty_cache()
     model.train()
 
     return score
 
 def save(model, optimizer, save_path, config):
     checkpoint = {
-        "model": model.module.state_dict(),
+        "model": model.state_dict(),
         "optimizer": optimizer.state_dict(),
         "step": config.global_step,
         "epoch": config.global_epoch
@@ -270,10 +267,10 @@ def save(model, optimizer, save_path, config):
 
 def load(model, optimizer, save_path, local_rank, config):
     checkpoint = torch.load(save_path, map_location = lambda storage, loc: storage.cuda(local_rank))
-    model.module.load_state_dict(checkpoint["model"])
+    model.load_state_dict(checkpoint["model"])
     optimizer.load_state_dict(checkpoint["optimizer"])
-    config.global_step = checkpoint["global_step"]
-    config.global_epoch = checkpoint["global_epoch"]
+    config.global_step = checkpoint["step"]
+    config.global_epoch = checkpoint["epoch"]
 
 if __name__ == "__main__":
     os.environ["KMP_WARNINGS"] = "0"
