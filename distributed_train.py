@@ -89,6 +89,7 @@ def init_process(local_rank, backend, config):
     train.max_iter = len(list(reader.make_batch("train")))
     validate.max_iter = len(list(reader.make_batch("dev")))
 
+    lr = config.lr
     max_score = 0
     early_stop_count = config.early_stop_count
 
