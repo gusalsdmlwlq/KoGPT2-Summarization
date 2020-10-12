@@ -82,16 +82,16 @@ def init_process(local_rank, backend, config):
     optimizer = Adam(model.parameters(), lr=config.lr)
     model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], output_device=local_rank)
 
+    lr = config.lr
+    max_score = 0
+    early_stop_count = config.early_stop_count
+
     if config.save_path is not None:
-        load(model, optimizer, config.save_path, local_rank, config)
+        max_score = load(model, optimizer, config.save_path, local_rank, config)
 
     train.global_step = config.global_step
     train.max_iter = len(list(reader.make_batch("train")))
     validate.max_iter = len(list(reader.make_batch("dev")))
-
-    lr = config.lr
-    max_score = 0
-    early_stop_count = config.early_stop_count
 
     logger.info("Validate...")
     score = validate(model, reader, config, local_rank)
@@ -121,7 +121,7 @@ def init_process(local_rank, backend, config):
 
         if score > max_score:  # save model
             if local_rank == 0:
-                save(model, optimizer, save_path, config)
+                save(model, optimizer, save_path, config, score)
                 logger.info("Saved to {}.".format(os.path.abspath(save_path)))
             
             max_score = score
@@ -260,12 +260,13 @@ def validate(model, reader, config, local_rank):
 
     return score
 
-def save(model, optimizer, save_path, config):
+def save(model, optimizer, save_path, config, score):
     checkpoint = {
         "model": model.module.state_dict(),
         "optimizer": optimizer.state_dict(),
         "step": config.global_step,
-        "epoch": config.global_epoch
+        "epoch": config.global_epoch,
+        "score": score
     }
     torch.save(checkpoint, save_path)
 
@@ -275,6 +276,8 @@ def load(model, optimizer, save_path, local_rank, config):
     optimizer.load_state_dict(checkpoint["optimizer"])
     config.global_step = checkpoint["step"]
     config.global_epoch = checkpoint["epoch"]
+    
+    return checkpoint["score"]
 
 if __name__ == "__main__":
     os.environ["KMP_WARNINGS"] = "0"
