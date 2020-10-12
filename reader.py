@@ -8,14 +8,13 @@ import json
 import numpy as np
 import torch
 from sentencepiece import SentencePieceProcessor as sp
-from kogpt2.utils import get_tokenizer
 
 from config import Config
 
 
 class Reader:
     def __init__(self, config):
-        self.tokenizer = sp(get_tokenizer())
+        self.tokenizer = sp(config.kogpt2_tokenizer_path)
         self.train_data = []
         self.dev_data = []
         self.data_path = config.data_path

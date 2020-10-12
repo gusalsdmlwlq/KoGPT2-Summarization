@@ -5,6 +5,8 @@ class Config:
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--data_path", default="data", type=str)
+    parser.add_argument("--kogpt2_model_path", default="save/kogpt2.pt", type=str)
+    parser.add_argument("--kogpt2_tokenizer_path", default="save/kogpt2.sp", type=str)
     parser.add_argument("--bos_idx", default=0, type=int)
     parser.add_argument("--eos_idx", default=1, type=int)
     parser.add_argument("--pad_idx", default=3, type=int)

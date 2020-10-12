@@ -239,6 +239,7 @@ def validate(model, reader, config, local_rank):
                     new_inputs[b_idx, :len(b_input)] = torch.tensor(b_input, dtype=torch.int64)
                 inputs = new_inputs
                 del new_inputs, outputs
+                torch.cuda.empty_cache()
                 if eos_batches == end_batches:
                     break
             words = torch.stack(words, dim=1).tolist()
